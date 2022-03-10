@@ -1,9 +1,14 @@
 # Return Predictions in E-Commerce
 
+## Abstract
+
+Key words: E-Commerce, Ensemble Learning
+
+
 ## 0. Preliminaries
-```
 To execute the provided code, just follow the steps outlined below:
 
+```
 1.  Open a terminal and navigate to the location of the project folder.
 
 2.  Now set up a virtual environment using venv
@@ -26,13 +31,7 @@ To execute the provided code, just follow the steps outlined below:
     -   py main.py
 ```
 
-
-## 1. Abstract
-
-Key words: E-Commerce, Ensemble Learning
-
-
-## 2. Data 
+## 1. Data 
 The data set consists of two separated files ("known" & "unknown"), one with 100,000 data points and 14 variables ("known"-data set) & one with 50,000 
 data points and 13 variables ("unknown"). The missing variable in the "unknown"-set is the binary target variable "return". Therefore, the "unknown"-data
 set will only be used for prediction and it's evaluation will be conducted via the corresponding [Kaggle-competition](). Subsequently, the "known"-data 
@@ -44,18 +43,17 @@ If you want to run the experiments, please create a folder called "data" in the 
 URL into the newly created "data"-folder.
 
 
-## 3. Exploratory Data Analysis
+## 2. Exploratory Data Analysis
 
 
-## 4. Feature Engineering & Selection
-Contains a few high level parameters that are used throughout multiple script files. Only change if absolutely necessary.
+## 3. Feature Engineering & Selection
 
 
-## 5. Modelling  
+## 4. Modelling  
 
 
-## 6. Conclusion
+## 5. Conclusion
 
 
-## 7. References
+## 6. References
 
