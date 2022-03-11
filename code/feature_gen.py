@@ -4,6 +4,7 @@ import pandas as pd
 import re
 from tqdm import tqdm
 import datetime
+from typing import Union
 
 
 class FeatureGen(object):
@@ -75,6 +76,7 @@ class FeatureGen(object):
         })
         self.data = self.data.merge(item_df, how='left')
         self.data[f'{agg_fun}_ref_price'] = (self.data['item_price'] / self.data[f'{agg_fun}_price']).fillna(0)
+        self.data[f'{agg_fun}_ref_price'] = self.data[f'{agg_fun}_ref_price'].replace([-np.inf, np.inf], 0)
         self.data.drop(labels=f'{agg_fun}_price', axis=1, inplace=True)
 
     def _rolling_ref_price(self, agg_fun: str = 'mean', window: int = 7):
@@ -88,8 +90,7 @@ class FeatureGen(object):
 
         self.data = self.data.merge(tmp, how='left')
         self.data[f'{window}d_rolling_{agg_fun}_ref_price'] = (self.data['item_price'] / self.data[f'{window}d_rolling_{agg_fun}_price']).fillna(0)
-        self.data.drop(labels=f'{window}d_rolling_{agg_fun}_price', axis=1, inplace = True)
-
+        self.data.drop(labels=f'{window}d_rolling_{agg_fun}_price', axis=1, inplace=True)
 
     def _mep_in_basket(self):
         tmp = self.data.groupby(['user_id', 'order_date']).agg({
@@ -110,99 +111,6 @@ class FeatureGen(object):
         tmp['solo_purchase'] = tmp['counts'].apply(lambda x: 1 if x == 1 else 0)
         self.data = self.data.merge(tmp.loc[:, ['user_id', 'order_date', 'solo_purchase']], how='left')
 
-    def _item_size_diff(self):
-        self.data['norm_size'] = self.data['item_size'].apply(lambda x: x.lower())
-        
-        # Insert placeholder for 'unsized' value
-        cond_unsized = self.data['norm_size'] == 'unsized'
-        self.data.loc[cond_unsized, 'norm_size'] = '10000'
-        
-        # Replace '+' with ''
-        self.data['norm_size'] = np.array([re.sub(r'\+', '', size) for size in self.data['norm_size']])
-        
-        # Convert sizes for trousers to the same placeholder as for 'unsized'
-        cond1 = [bool(re.search(r'[0-9]+', size)) for size in self.data['norm_size']]
-        cond2 = [len(size) == 4 for size in self.data['norm_size']]
-        cond3 = [bool(re.search(r'^[^.]*$', size)) for size in self.data['norm_size']]
-        cond = np.array(cond1) & np.array(cond2) & np.array(cond3)
-        
-        self.data.loc[cond, 'norm_size'] = '10000'
-        
-        # Convert all sizes to European sizes (women clothes)
-        size_dict = {
-            'xs': '32'
-            , 's': '36'
-            , 'm': '40'
-            , 'l': '44'
-            , 'xl': '48'
-            , 'xxl': '52'
-            , 'xxxl': '56'
-            , '76': '28'
-            , '80': '32'
-            , '84': '36'
-            , '88': '40'
-            , '90': '42'
-            , '92': '44'
-            , '95': '47'
-            , '96': '48'
-            , '100': '52'
-            , '104': '56'
-            , '105': '57'
-            , '116': '32'
-            , '128': '36'
-            , '140': '40'
-            , '152': '44'
-            , '164': '48'
-            , '176': '52'
-            , '1': '28'
-            , '2': '29'
-            , '3': '30'
-            , '4': '32'
-            , '5': '33'
-            , '6': '34'
-            , '7': '35'
-            , '8': '36'
-            , '9': '37'
-            , '10': '38'
-            , '11': '39'
-            , '12': '40'
-            , '13': '41'
-            , '14': '42'
-            , '18': '46'
-            , '19': '47'
-            , '20': '48'
-            , '21': '49'
-            , '22': '50'
-            , '23': '51'
-            , '24': '52'
-            , '25': '53'
-            , '26': '54'
-            , '27': '55'
-            , '28': '56'
-            , '29': '57'
-            , '30': '58'
-        }
-        
-        self.data['norm_size'] = self.data['norm_size'].apply(lambda x: size_dict[x] if x in size_dict.keys() else x)
-        self.data['norm_size'] = self.data['norm_size'].apply(float)
-        
-        # Replace missing item sizes (currently encoded as '10000' with the median size)
-        cond = self.data['norm_size'] == 10_000
-        norm_size_med = self.data.loc[~cond, 'norm_size'].median()
-        
-        self.data.loc[cond, 'norm_size'] = norm_size_med
-        
-        # Difference to median normalized item size per user 
-        tmp = self.data.groupby('user_id').agg({
-            'norm_size': 'median'
-        }).reset_index().rename(columns={
-            'norm_size': 'median_user_size'
-        })
-        
-        self.data = self.data.merge(tmp, how='left')
-        self.data['med_size_diff'] = self.data['norm_size'] - self.data['median_user_size']
-        self.data.drop(labels=['median_user_size', 'norm_size'], axis=1, inplace=True)
-    
     def _cat_dummies(self):
         # unsized dummy
         self.data['unsized_dummy'] = self.data['item_size'].apply(lambda x: 1 if x == 'unsized' else 0)
@@ -228,16 +136,19 @@ class FeatureGen(object):
         tmp.columns = [i.lower().replace(" ", "_") for i in tmp.columns]
         self.data = pd.concat([self.data, tmp], axis=1)
 
-    def _truncator(self, feature_list: list, thr: int = 10):
-        for feature in feature_list:
+    def _truncator(self, feature_list: list, thr: Union[int, list] = 10):
+        if isinstance(thr, int):
+            thr = np.tile(thr, len(feature_list))
+
+        for idx, feature in enumerate(feature_list):
             count_df = self.data.groupby(feature).agg({
                 'order_item_id': 'count'
             }).reset_index().rename(columns={
                 'order_item_id': 'count'
             })
 
-            cond = count_df['count'] < thr
-            vals = count_df.loc[cond, feature].values
+            cond = count_df['count'] < thr[idx]
+            vals = count_df.loc[cond, feature].apply(str).values
             self.data[feature] = self.data[feature].apply(str)
             self.data.loc[self.data[feature].isin(vals), feature] = 'misc'
 
@@ -270,8 +181,7 @@ class FeatureGen(object):
             self.data = self.data.merge(woe_df, how='left')
             self.data[f'woe_{feature}'] = self.data[f'woe_{feature}'].fillna(0)
 
-
-    def prep_wrapper(self, agg_fun, window: int = 7, cat_trans: str = None, feature_list: list = None, thr: int = 10, correction: float = 0.01):
+    def prep_wrapper(self, agg_fun, window: int = 7, cat_trans: str = None, feature_list: list = None, thr: Union[int, list] = 10, correction: float = 0.01):
         start = time.time()
         print(80 * '=')
         print("Start preparing data:")
@@ -287,40 +197,47 @@ class FeatureGen(object):
         print("\t 5.) Create dummy for most expensive product in a basket: Done.")
         self._solo_item_purchase()
         print("\t 6.) Dummy indicating if a product was bought alone or not: Done.")
-        self._item_size_diff()
-        print("\t 7.) Distance to the median of the standardized item size per user: Done.")
         self._cat_dummies()
-        print("\t 8.) Dummies for certain categories (e.g. unsized dummy, seasonal effect, etc.): Done.")
+        print("\t 7.) Dummies for certain categories (e.g. unsized dummy, seasonal effect, etc.): Done.")
         for agg in agg_fun:
             self._ref_price(agg_fun=agg)
             self._rolling_ref_price(agg_fun=agg, window=window)
-        print("\t 9.) Ref. prices: Done.")
+        print("\t 8.) Ref. prices: Done.")
         if cat_trans == 'WOE':
             self._truncator(feature_list=feature_list, thr=thr)
             self._compute_woe(feature_list=feature_list, correction=correction)
-            print("\t 10.) WOE calculations: Done.")
+            print("\t 9.) WOE calculations: Done.")
         elif cat_trans == 'CE':
             self._truncator(feature_list=feature_list, thr=thr)
             self._compute_ce(feature_list=feature_list)
-            print("\t 10.) CE calculations: Done.")
+            print("\t 9.) CE calculations: Done.")
         else:
             pass
             #self._truncator(feature_list=feature_list, thr=thr)
-        # Save the preprocessed data:
+        # Save  the preprocessed data:
         if self.save_path is not None:
             if cat_trans is None:
                 self.data.to_parquet(self.save_path + '/data_cleaned.parquet')
                 self.data.drop(labels=['order_date', 'delivery_date', 'user_dob', 'user_title', 'user_reg_date'], axis=1, inplace=True)
+                for col in self.data.columns:
+                    if self.data[col].dtype == 'float64':
+                        self.data[col] = self.data[col].astype("float32")
                 self.data.loc[self.data['known'] == 1, self.data.columns != 'known'].to_parquet(self.save_path + '/known_cleaned.parquet')
                 self.data.loc[self.data['known'] == 0, self.data.columns != 'known'].to_parquet(self.save_path + '/unknown_cleaned.parquet')
             elif cat_trans == 'WOE':
                 self.data.to_parquet(self.save_path + '/data_cleaned_woe.parquet')
-                self.data.drop(labels=['order_date', 'delivery_date', 'user_dob', 'user_title', 'user_reg_date'], axis=1, inplace=True)
+                self.data.drop(labels=['order_date', 'delivery_date', 'user_dob', 'user_title', 'user_reg_date', 'item_id', 'item_size', 'item_color', 'user_id', 'brand_id', 'user_state'], axis=1, inplace=True)
+                for col in self.data.columns:
+                    if self.data[col].dtype == 'float64':
+                        self.data[col] = self.data[col].astype("float32")
                 self.data.loc[self.data['known'] == 1, self.data.columns != 'known'].to_parquet(self.save_path + '/known_cleaned_woe.parquet')
                 self.data.loc[self.data['known'] == 0, self.data.columns != 'known'].to_parquet(self.save_path + '/unknown_cleaned_woe.parquet')
             elif cat_trans == 'CE':
                 self.data.to_parquet(self.save_path + '/data_cleaned_ce.parquet')
-                self.data.drop(labels=['order_date', 'delivery_date', 'user_dob', 'user_title', 'user_reg_date'], axis=1, inplace=True)
+                self.data.drop(labels=['order_date', 'delivery_date', 'user_dob', 'user_title', 'user_reg_date', 'item_id', 'item_size', 'item_color', 'user_id', 'brand_id', 'user_state'], axis=1, inplace=True)
+                for col in self.data.columns:
+                    if self.data[col].dtype == 'float64':
+                        self.data[col] = self.data[col].astype("float32")
                 self.data.loc[self.data['known'] == 1, self.data.columns != 'known'].to_parquet(self.save_path + '/known_cleaned_ce.parquet')
                 self.data.loc[self.data['known'] == 0, self.data.columns != 'known'].to_parquet(self.save_path + '/unknown_cleaned_ce.parquet')
             else:
@@ -330,5 +247,3 @@ class FeatureGen(object):
         end = time.time()
         print(f"\nFeature creation finished in {(end-start)/60:.2f} min.\n")
         print(80 * "=")
-
-

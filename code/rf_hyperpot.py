@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split, StratifiedKFold
-import xgboost as xgb
+from sklearn.ensemble import RandomForestClassifier
 from hyperopt import Trials, fmin, hp, tpe
 from functools import partial
 import pickle as pkl
@@ -24,7 +24,7 @@ sys.path.extend([
 
 import feature_gen as fg
 from utils import *
-from optimizers import optimizer_xgb
+from optimizers import optimizer_rf
 
 # 1. Prepare features
 arg_dict = {
@@ -75,26 +75,24 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 # 4. Hyperparameter Tuning
 params = {
-    'learning_rate': hp.uniform('learning_rate', 0.0001, 0.01)
-    , 'colsample_bylevel': hp.uniform('colsample_bylevel', 0, 1)
-    , 'colsample_bynode': hp.uniform('colsample_bynode', 0, 1)
-    , 'gamma': hp.uniform('gamma', 0, 3)
+    'n_estimators': hp.quniform('n_estimators', 50, 800, 25)
     , 'max_depth': hp.quniform('max_depth', 2, 8, 1)
-    , 'subsample': hp.uniform('subsample', 0.5, 1)
-    , 'n_estimators': hp.quniform('n_estimators', 250, 800, 25)
-    , 'reg_lambda': hp.uniform('reg_lambda', 0, 1)
-    , 'reg_alpha': hp.uniform('reg_alpha', 0, 1)
-    , 'min_child_weight': hp.uniform('min_child_weight', 1, 5)
+    , 'max_features': hp.uniform('max_features', 0.3, 0.9)
+    , 'max_samples': hp.uniform('max_samples', 0.3, 0.9)
+    , 'min_samples_split': hp.uniform('min_samples_split', 0.00001, 0.1)
+    , 'min_samples_leaf': hp.uniform('min_samples_leaf', 0.00001, 0.1)
+    , 'min_impurity_decrease': hp.uniform('min_impurity_decrease', 0.000001, 0.001)
 }
 
 fmin_objective = partial(
-    optimizer_xgb
+    optimizer_rf
     , x=X_train
     , y=y_train
     , feature_list=fl_woe
-    , woe=True
+    , crit='entropy'
     , random_state=random_state
     , n_splits=5
+    , woe=True
     , woe_correction=correction
 )
 
@@ -120,7 +118,7 @@ for key, val in best_hyperparams.items():
     else:
         new_param_dict[key] = val
 
-with open(param_path + '\\tuned_parameters_xgb.pickle', 'wb') as handle:
+with open(param_path + '\\tuned_parameters_rf.pickle', 'wb') as handle:
     pkl.dump(new_param_dict, handle)
 
 
@@ -161,25 +159,18 @@ for col in fl_woe:
     X_test.drop(labels=col, axis=1, inplace=True)
 
 # 6.2. Train classifier with tuned hyperparameters
-with open(param_path + '\\tuned_parameters_xgb.pickle', 'rb') as handle:
+with open(param_path + '\\tuned_parameters_rf.pickle', 'rb') as handle:
     new_param_dict = pkl.load(handle)
 
-gbm = xgb.XGBClassifier(
-    **new_param_dict
-    , random_state=random_state
-    , use_label_encoder=False
-    , eval_metric='auc'
-    , objective='binary:logistic'
-    , n_jobs=-1
-)
-gbm.fit(X_train, y_train)
+rf = RandomForestClassifier(**new_param_dict)
+rf.fit(X_train, y_train)
 
 # 6.3. Make predictions using classifier with tuned hyperparameters & evaluate on test set
-y_hat_train = gbm.predict_proba(X_train)[:, 1]
-y_hat_test = gbm.predict_proba(X_test)[:, 1]
+y_hat_train = rf.predict_proba(X_train)[:, 1]
+y_hat_test = rf.predict_proba(X_test)[:, 1]
 print(f"ROC-AUC Score on the Train set: {roc_auc_score(y_train, y_hat_train):.4f}")
 print(f"ROC-AUC Score on the Test set: {roc_auc_score(y_test, y_hat_test):.4f}")
 
 # 6.4. Save the model
-with open(model_path + '\\xgb_model.pickle', 'wb') as handle:
-    pkl.dump(gbm, handle)
+with open(model_path + '\\rf_model.pickle', 'wb') as handle:
+    pkl.dump(rf, handle)

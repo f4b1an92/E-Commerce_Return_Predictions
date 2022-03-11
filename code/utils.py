@@ -41,10 +41,10 @@ def compute_woe(data: pd.DataFrame, feature_list: Union[str, list], correction: 
 
     for feature in feature_list:
         woe_df = data.groupby(feature).agg({
-            'order_item_id': 'count'
+            'item_price': 'count'
             , 'return': 'sum'
         }).reset_index().rename(columns={
-            'order_item_id': 'total'
+            'item_price': 'total'
             , 'return': 'events'
         })
         woe_df['non_events'] = woe_df['total'] - woe_df['events']
@@ -71,7 +71,7 @@ def compute_iv(data: pd.DataFrame, woe_vars: Union[str, list], correction: int =
     result_dict = {}
     for var in woe_vars:
         tmp = data_with_woe.groupby(f'woe_{var}').agg({
-            'order_item_id': 'count'
+            'item_price': 'count'
             , 'return': 'sum'
         }).reset_index()
         tmp.columns = ['woe', 'count', 'events']
